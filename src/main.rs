@@ -12,7 +12,10 @@ use rtic::app;
 mod app {
 
     use microbit::{
-        board::Board,
+        board::{
+            Board,
+            Buttons,
+        },
         display::nonblocking::{Display, GreyscaleImage},
         hal::{
             prelude::*,
@@ -56,6 +59,7 @@ mod app {
     struct Local {
         timer0: Timer<pac::TIMER0, Periodic>,
         pins: gpio::DisplayPins,
+        buttons: Buttons,
     }
 
     #[init]
@@ -63,34 +67,39 @@ mod app {
         rtt_init_print!();
         let mut board = Board::new(cx.device, cx.core);
 
-        let stat = board.CLOCK.hfclkstat.read().bits();
-        rprintln!("{:032b}", stat);
-
         let clocks = Clocks::new(board.CLOCK);
         clocks.enable_ext_hfosc();
-
-        let clock_periph = unsafe { Peripherals::steal() }.CLOCK;
-        let stat = clock_periph.hfclkstat.read().bits();
-        rprintln!("{:032b}", stat);
 
         toggle(&mut board.display_pins.row1);
         toggle(&mut board.display_pins.col1);
         
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(1_000_000u32);
+        timer0.start(1_000_000u32/10);
         timer0.enable_interrupt();
 
         let pins = board.display_pins;
 
-        (Shared {} , Local { timer0, pins }, init::Monotonics())
+        let btnval = board.buttons.button_a.is_high().unwrap();
+        rprintln!("{}", btnval);
+
+        let buttons = board.buttons;
+
+        (Shared {} , Local { timer0, pins, buttons }, init::Monotonics())
     }
 
-    #[task(binds = TIMER0, local = [timer0, pins])]
+    #[task(binds = TIMER0, local = [timer0, pins, buttons])]
     fn timer0(cx: timer0::Context) {
         rprintln!("timer 0 ticked !");
         let _ = cx.local.timer0.wait(); // consume the event
         let pins = cx.local.pins;
         toggle(&mut pins.col1);
+
+        let btnval = cx.local.buttons.button_a.is_high().void_unwrap();
+        if btnval {
+            pins.col1.set_high().void_unwrap();
+        } else {
+            pins.col1.set_low().void_unwrap();
+        }
     }
 
 
