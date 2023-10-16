@@ -21,8 +21,10 @@ mod app {
             timer::Instance,
         },
         pac, Peripherals,
+        gpio,
     };
     use rtt_target::{rprintln, rtt_init_print};
+    use void::{ResultVoidExt, Void};
 
     // fn heart_image(inner_brightness: u8) -> GreyscaleImage {
     //     let b = inner_brightness;
@@ -53,24 +55,51 @@ mod app {
     #[local]
     struct Local {
         timer0: Timer<pac::TIMER0, Periodic>,
+        pins: gpio::DisplayPins,
     }
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
         rtt_init_print!();
-        let board = Board::new(cx.device, cx.core);
+        let mut board = Board::new(cx.device, cx.core);
+
+        let stat = board.CLOCK.hfclkstat.read().bits();
+        rprintln!("{:032b}", stat);
+
+        let clocks = Clocks::new(board.CLOCK);
+        clocks.enable_ext_hfosc();
+
+        let clock_periph = unsafe { Peripherals::steal() }.CLOCK;
+        let stat = clock_periph.hfclkstat.read().bits();
+        rprintln!("{:032b}", stat);
+
+        toggle(&mut board.display_pins.row1);
+        toggle(&mut board.display_pins.col1);
         
         let mut timer0 = Timer::periodic(board.TIMER0);
         timer0.start(1_000_000u32);
         timer0.enable_interrupt();
 
-        (Shared {} , Local { timer0 }, init::Monotonics())
+        let pins = board.display_pins;
+
+        (Shared {} , Local { timer0, pins }, init::Monotonics())
     }
 
-    #[task(binds = TIMER0, local = [timer0])]
+    #[task(binds = TIMER0, local = [timer0, pins])]
     fn timer0(cx: timer0::Context) {
         rprintln!("timer 0 ticked !");
         let _ = cx.local.timer0.wait(); // consume the event
+        let pins = cx.local.pins;
+        toggle(&mut pins.col1);
+    }
+
+
+    fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
+        if pin.is_set_high().void_unwrap() {
+            pin.set_low().void_unwrap();
+        } else {
+            pin.set_high().void_unwrap();
+        }
     }
 
     // #[init]
