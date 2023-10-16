@@ -1,0 +1,11 @@
+[package]
+name = "microbit-rtic-display"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"]}
+panic-halt = "0.2.0"
+cortex-m-rtic = { version = "1.1" }
+microbit-v2 = "0.13.0"
+rtt-target = "0.4.0"
