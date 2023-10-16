@@ -22,6 +22,7 @@ mod app {
             clocks::Clocks,
             rtc::{Rtc, RtcInterrupt}, Timer, timer::Periodic,
             timer::Instance,
+            gpiote::{Gpiote, GpioteChannel},
         },
         pac, Peripherals,
         gpio,
@@ -59,7 +60,8 @@ mod app {
     struct Local {
         timer0: Timer<pac::TIMER0, Periodic>,
         pins: gpio::DisplayPins,
-        buttons: Buttons,
+        //buttons: Buttons,
+        ch0: GpioteChannel,
     }
 
     #[init]
@@ -74,34 +76,35 @@ mod app {
         toggle(&mut board.display_pins.col1);
         
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(1_000_000u32/10);
+        timer0.start(1_000_000u32);
         timer0.enable_interrupt();
 
         let pins = board.display_pins;
 
-        let btnval = board.buttons.button_a.is_high().unwrap();
-        rprintln!("{}", btnval);
+        let gpiote = Gpiote::new(board.GPIOTE);
+        
+        let ch0 = gpiote.channel0();
+        ch0
+            .input_pin(&board.buttons.button_a.degrade())
+            .hi_to_lo()
+            .enable_interrupt();
+        ch0.reset_events();
 
-        let buttons = board.buttons;
-
-        (Shared {} , Local { timer0, pins, buttons }, init::Monotonics())
+        (Shared {} , Local { timer0, pins, ch0 }, init::Monotonics())
     }
 
-    #[task(binds = TIMER0, local = [timer0, pins, buttons])]
+    #[task(binds = TIMER0, local = [timer0, pins])]
     fn timer0(cx: timer0::Context) {
         rprintln!("timer 0 ticked !");
         let _ = cx.local.timer0.wait(); // consume the event
         let pins = cx.local.pins;
         toggle(&mut pins.col1);
-
-        let btnval = cx.local.buttons.button_a.is_high().void_unwrap();
-        if btnval {
-            pins.col1.set_high().void_unwrap();
-        } else {
-            pins.col1.set_low().void_unwrap();
-        }
     }
 
+    #[task(binds = GPIOTE, local = [ch0])]
+    fn gpiote(cx: gpiote::Context) {
+        rprintln!("button press");
+    }
 
     fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
         if pin.is_set_high().void_unwrap() {
