@@ -38,7 +38,7 @@ mod app {
         debounce_timer: Timer<pac::TIMER1, Periodic>,
         pins: gpio::DisplayPins,
         buttons: Buttons,
-        debouncer: Debouncer
+        debouncers: [Debouncer; 2]
     }
 
     #[init]
@@ -61,7 +61,10 @@ mod app {
         let mut timer1 = Timer::periodic(board.TIMER1);
         timer1.start(5_000u32);
         timer1.enable_interrupt();
-        let debouncer = Debouncer::new(2, 10);
+        let debouncers = [
+            Debouncer::new(2, 10),
+            Debouncer::new(2, 10)
+        ];
 
         (
             Shared {},
@@ -70,7 +73,7 @@ mod app {
                 debounce_timer: timer1,
                 pins: board.display_pins,
                 buttons: board.buttons,
-                debouncer: debouncer,
+                debouncers: debouncers,
             },
             init::Monotonics(),
         )
@@ -78,23 +81,26 @@ mod app {
 
     #[task(binds = TIMER0, local = [display_timer, pins])]
     fn handle_display_timer(cx: handle_display_timer::Context) {
-        rprintln!("timer 0 ticked !");
         let _ = cx.local.display_timer.wait(); // consume the event
         let pins = cx.local.pins;
         toggle(&mut pins.col1);
+        rprintln!("timer 0 ticked !");
     }
 
-    #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncer])]
+    #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers])]
     fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
         let _ = cx.local.debounce_timer.wait(); // consume the event
-        let raw_state = if cx.local.buttons.button_a.is_high().void_unwrap() {
-            ButtonState::NotPressed
-        } else {
-            ButtonState::Pressed
-        };
-        let result = cx.local.debouncer.update(raw_state);
-        if let Some(new_state) = result {
-            rdbg!(new_state);
+        let raw_states = [
+            if cx.local.buttons.button_a.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed },
+            if cx.local.buttons.button_b.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed },
+        ];
+        for i in 0..2 {
+            let raw_state = raw_states[i];
+            let debouncer = &mut cx.local.debouncers[i];
+            let result = debouncer.update(raw_state);
+            if let Some(new_state) = result {
+                rdbg!(i, new_state);
+            }
         }
     }
 }
@@ -114,12 +120,12 @@ fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
 pub struct Debouncer {
     press_ticks: usize,
     release_ticks: usize,
-    btn_state: ButtonState,
+    btn_state: BtnState,
     count: usize,
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
-enum ButtonState {
+enum BtnState {
     Pressed,
     NotPressed,
 }
@@ -129,18 +135,18 @@ impl Debouncer {
         Debouncer {
             press_ticks,
             release_ticks,
-            btn_state: ButtonState::NotPressed,
+            btn_state: BtnState::NotPressed,
             count: 0,
         }
     }
 
-    fn update(&mut self, raw_state: ButtonState) -> Option<ButtonState> {
+    fn update(&mut self, raw_state: BtnState) -> Option<BtnState> {
         if self.btn_state == raw_state {
             self.count = 0;
             return None;
         }
 
-        let target_ticks = if raw_state == ButtonState::Pressed {
+        let target_ticks = if raw_state == BtnState::Pressed {
             self.press_ticks
         } else {
             self.release_ticks
@@ -163,28 +169,28 @@ fn test_debouncer() {
     rprintln!("test_debouncer");
     let mut d = Debouncer::new(2, 4);
 
-    rdbg!(d.update(ButtonState::Pressed));
-    rdbg!(d.update(ButtonState::Pressed));
-    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
     rprintln!("");
 
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
     rprintln!("");
 
-    rdbg!(d.update(ButtonState::Pressed));
-    rdbg!(d.update(ButtonState::Pressed));
-    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
+    rdbg!(d.update(BtnState::Pressed));
     rprintln!("");
 
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
-    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
+    rdbg!(d.update(BtnState::NotPressed));
     rprintln!("");
 
 }
