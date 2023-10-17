@@ -26,7 +26,7 @@ mod app {
         },
         pac, Peripherals,
     };
-    use rtt_target::{rprintln, rdbg, rtt_init_print};
+    use rtt_target::{rdbg, rprintln, rtt_init_print};
     use void::{ResultVoidExt, Void};
 
     // fn heart_image(inner_brightness: u8) -> GreyscaleImage {
@@ -98,8 +98,7 @@ mod app {
                 timer0,
                 timer1,
                 pins,
-                buttons: board.buttons
-                //gpiote,
+                buttons: board.buttons, //gpiote,
             },
             init::Monotonics(),
         )
@@ -116,7 +115,11 @@ mod app {
     #[task(binds = TIMER1, local = [timer1, buttons, debouncer: Debouncer = Debouncer::new(2, 10)])]
     fn button_timer(cx: button_timer::Context) {
         let _ = cx.local.timer1.wait(); // consume the event
-        let raw_state = if cx.local.buttons.button_a.is_high().void_unwrap() { ButtonState::NotPressed } else { ButtonState::Pressed };
+        let raw_state = if cx.local.buttons.button_a.is_high().void_unwrap() {
+            ButtonState::NotPressed
+        } else {
+            ButtonState::Pressed
+        };
         let result = cx.local.debouncer.update(raw_state);
         if let Some(new_state) = result {
             rdbg!(new_state);
@@ -241,7 +244,7 @@ impl Debouncer {
             self.btn_state = raw_state;
             return Some(self.btn_state);
         } else {
-            return None
+            return None;
         }
     }
 }
