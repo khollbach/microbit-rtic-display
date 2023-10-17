@@ -1,5 +1,4 @@
 #![allow(unused_imports)]
-
 #![no_main]
 #![no_std]
 
@@ -13,22 +12,21 @@ mod app {
     use super::*;
 
     use microbit::{
-        board::{
-            Board,
-            Buttons,
-        },
+        board::{Board, Buttons},
         display::nonblocking::{Display, GreyscaleImage},
+        gpio,
         hal::{
-            prelude::*,
             clocks::Clocks,
-            rtc::{Rtc, RtcInterrupt}, Timer, timer::Periodic,
-            timer::Instance,
             gpiote::{Gpiote, GpioteChannel},
+            prelude::*,
+            rtc::{Rtc, RtcInterrupt},
+            timer::Instance,
+            timer::Periodic,
+            Timer,
         },
         pac, Peripherals,
-        gpio,
     };
-    use rtt_target::{rprintln, rtt_init_print};
+    use rtt_target::{rprintln, rdbg, rtt_init_print};
     use void::{ResultVoidExt, Void};
 
     // fn heart_image(inner_brightness: u8) -> GreyscaleImage {
@@ -52,17 +50,16 @@ mod app {
     //     anim_timer: Rtc<pac::RTC0>,
     // }
 
-
     #[shared]
-    struct Shared {
-    }
+    struct Shared {}
 
     #[local]
     struct Local {
         timer0: Timer<pac::TIMER0, Periodic>,
+        timer1: Timer<pac::TIMER1, Periodic>,
         pins: gpio::DisplayPins,
-        //buttons: Buttons,
-        gpiote: Gpiote,
+        buttons: Buttons,
+        //gpiote: Gpiote,
     }
 
     #[init]
@@ -75,23 +72,37 @@ mod app {
 
         toggle(&mut board.display_pins.row1);
         toggle(&mut board.display_pins.col1);
-        
+
         let mut timer0 = Timer::periodic(board.TIMER0);
         timer0.start(1_000_000u32);
         timer0.enable_interrupt();
 
+        let mut timer1 = Timer::periodic(board.TIMER1);
+        timer1.start(5_000u32);
+        timer1.enable_interrupt();
+
         let pins = board.display_pins;
 
+        /*
         let gpiote = Gpiote::new(board.GPIOTE);
-        
         let ch0 = gpiote.channel0();
-        ch0
-            .input_pin(&board.buttons.button_a.degrade())
+        ch0.input_pin(&board.buttons.button_a.degrade())
             .hi_to_lo()
             .enable_interrupt();
         ch0.reset_events();
+        */
 
-        (Shared {} , Local { timer0, pins, gpiote }, init::Monotonics())
+        (
+            Shared {},
+            Local {
+                timer0,
+                timer1,
+                pins,
+                buttons: board.buttons
+                //gpiote,
+            },
+            init::Monotonics(),
+        )
     }
 
     #[task(binds = TIMER0, local = [timer0, pins])]
@@ -102,12 +113,26 @@ mod app {
         toggle(&mut pins.col1);
     }
 
+    #[task(binds = TIMER1, local = [timer1, buttons, debouncer: Debouncer = Debouncer::new(2, 10)])]
+    fn button_timer(cx: button_timer::Context) {
+        let _ = cx.local.timer1.wait(); // consume the event
+        let raw_state = if cx.local.buttons.button_a.is_high().void_unwrap() { ButtonState::NotPressed } else { ButtonState::Pressed };
+        let result = cx.local.debouncer.update(raw_state);
+        if let Some(new_state) = result {
+            rdbg!(new_state);
+        }
+        //let pins = cx.local.pins;
+        //toggle(&mut pins.col1);
+    }
+
+    /*
     #[task(binds = GPIOTE, local = [gpiote])]
     fn gpiote(cx: gpiote::Context) {
         let ch0 = cx.local.gpiote.channel0();
         ch0.reset_events();
         rprintln!("button press");
     }
+    */
 
     // #[init]
     // fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -163,7 +188,6 @@ mod app {
     // }
 }
 
-
 use microbit::hal::prelude::*;
 use void::{ResultVoidExt, Void};
 
@@ -175,35 +199,82 @@ fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
     }
 }
 
-struct DebouncerState {
+#[derive(PartialEq)]
+pub struct Debouncer {
     press_ticks: usize,
     release_ticks: usize,
     btn_state: ButtonState,
-    count: usize
+    count: usize,
 }
 
+#[derive(PartialEq, Copy, Clone, Debug)]
 enum ButtonState {
     Pressed,
-    NotPressed
+    NotPressed,
 }
 
-impl DebouncerState {
-    fn new(press_ticks: usize, release_ticks: usize) -> Self {
-        DebouncerState {
+impl Debouncer {
+    const fn new(press_ticks: usize, release_ticks: usize) -> Self {
+        Debouncer {
             press_ticks,
             release_ticks,
             btn_state: ButtonState::NotPressed,
-            count: 0
+            count: 0,
         }
     }
 
-    fn update(self, raw_state: ButtonState) -> Option<ButtonState> {
+    fn update(&mut self, raw_state: ButtonState) -> Option<ButtonState> {
         if self.btn_state == raw_state {
             self.count = 0;
             return None;
         }
 
-        let target_ticks = 
-            if raw_state == ButtonState::Pressed { self.press_ticks } else { self.release_ticks };
+        let target_ticks = if raw_state == ButtonState::Pressed {
+            self.press_ticks
+        } else {
+            self.release_ticks
+        };
+
+        self.count += 1;
+        if self.count >= target_ticks {
+            self.count = 0;
+            self.btn_state = raw_state;
+            return Some(self.btn_state);
+        } else {
+            return None
+        }
     }
 }
+
+/*
+use rtt_target::{rprintln, rdbg};
+fn test_debouncer() {
+    rprintln!("test_debouncer");
+    let mut d = Debouncer::new(2, 4);
+
+    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(ButtonState::Pressed));
+    rprintln!("");
+
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rprintln!("");
+
+    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(ButtonState::Pressed));
+    rdbg!(d.update(ButtonState::Pressed));
+    rprintln!("");
+
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rdbg!(d.update(ButtonState::NotPressed));
+    rprintln!("");
+
+}
+*/
