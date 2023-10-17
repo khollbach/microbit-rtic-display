@@ -34,10 +34,11 @@ mod app {
 
     #[local]
     struct Local {
-        timer0: Timer<pac::TIMER0, Periodic>,
-        timer1: Timer<pac::TIMER1, Periodic>,
+        display_timer: Timer<pac::TIMER0, Periodic>,
+        debounce_timer: Timer<pac::TIMER1, Periodic>,
         pins: gpio::DisplayPins,
         buttons: Buttons,
+        debouncer: Debouncer
     }
 
     #[init]
@@ -51,39 +52,41 @@ mod app {
         toggle(&mut board.display_pins.row1);
         toggle(&mut board.display_pins.col1);
 
+        // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
         timer0.start(1_000_000u32);
         timer0.enable_interrupt();
 
+        // button debounce timer
         let mut timer1 = Timer::periodic(board.TIMER1);
         timer1.start(5_000u32);
         timer1.enable_interrupt();
-
-        let pins = board.display_pins;
+        let debouncer = Debouncer::new(2, 10);
 
         (
             Shared {},
             Local {
-                timer0,
-                timer1,
-                pins,
+                display_timer: timer0,
+                debounce_timer: timer1,
+                pins: board.display_pins,
                 buttons: board.buttons,
+                debouncer: debouncer,
             },
             init::Monotonics(),
         )
     }
 
-    #[task(binds = TIMER0, local = [timer0, pins])]
-    fn timer0(cx: timer0::Context) {
+    #[task(binds = TIMER0, local = [display_timer, pins])]
+    fn handle_display_timer(cx: handle_display_timer::Context) {
         rprintln!("timer 0 ticked !");
-        let _ = cx.local.timer0.wait(); // consume the event
+        let _ = cx.local.display_timer.wait(); // consume the event
         let pins = cx.local.pins;
         toggle(&mut pins.col1);
     }
 
-    #[task(binds = TIMER1, local = [timer1, buttons, debouncer: Debouncer = Debouncer::new(2, 10)])]
-    fn button_timer(cx: button_timer::Context) {
-        let _ = cx.local.timer1.wait(); // consume the event
+    #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncer])]
+    fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
+        let _ = cx.local.debounce_timer.wait(); // consume the event
         let raw_state = if cx.local.buttons.button_a.is_high().void_unwrap() {
             ButtonState::NotPressed
         } else {
