@@ -10,6 +10,7 @@ use rtic::app;
 
 #[app(device = microbit::pac, peripherals = true)]
 mod app {
+    use super::*;
 
     use microbit::{
         board::{
@@ -108,14 +109,6 @@ mod app {
         rprintln!("button press");
     }
 
-    fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
-        if pin.is_set_high().void_unwrap() {
-            pin.set_low().void_unwrap();
-        } else {
-            pin.set_high().void_unwrap();
-        }
-    }
-
     // #[init]
     // fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
     //     let board = Board::new(cx.device, cx.core);
@@ -168,4 +161,49 @@ mod app {
     //         *local.step = 0
     //     };
     // }
+}
+
+
+use microbit::hal::prelude::*;
+use void::{ResultVoidExt, Void};
+
+fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
+    if pin.is_set_high().void_unwrap() {
+        pin.set_low().void_unwrap();
+    } else {
+        pin.set_high().void_unwrap();
+    }
+}
+
+struct DebouncerState {
+    press_ticks: usize,
+    release_ticks: usize,
+    btn_state: ButtonState,
+    count: usize
+}
+
+enum ButtonState {
+    Pressed,
+    NotPressed
+}
+
+impl DebouncerState {
+    fn new(press_ticks: usize, release_ticks: usize) -> Self {
+        DebouncerState {
+            press_ticks,
+            release_ticks,
+            btn_state: ButtonState::NotPressed,
+            count: 0
+        }
+    }
+
+    fn update(self, raw_state: ButtonState) -> Option<ButtonState> {
+        if self.btn_state == raw_state {
+            self.count = 0;
+            return None;
+        }
+
+        let target_ticks = 
+            if raw_state == ButtonState::Pressed { self.press_ticks } else { self.release_ticks };
+    }
 }
