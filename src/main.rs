@@ -61,7 +61,7 @@ mod app {
         timer0: Timer<pac::TIMER0, Periodic>,
         pins: gpio::DisplayPins,
         //buttons: Buttons,
-        ch0: GpioteChannel,
+        gpiote: Gpiote,
     }
 
     #[init]
@@ -90,7 +90,7 @@ mod app {
             .enable_interrupt();
         ch0.reset_events();
 
-        (Shared {} , Local { timer0, pins, ch0 }, init::Monotonics())
+        (Shared {} , Local { timer0, pins, gpiote }, init::Monotonics())
     }
 
     #[task(binds = TIMER0, local = [timer0, pins])]
@@ -101,8 +101,10 @@ mod app {
         toggle(&mut pins.col1);
     }
 
-    #[task(binds = GPIOTE, local = [ch0])]
+    #[task(binds = GPIOTE, local = [gpiote])]
     fn gpiote(cx: gpiote::Context) {
+        let ch0 = cx.local.gpiote.channel0();
+        ch0.reset_events();
         rprintln!("button press");
     }
 
