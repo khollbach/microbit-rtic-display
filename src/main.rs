@@ -89,21 +89,37 @@ mod app {
 
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers])]
     fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
+        // TODO: better to clear the event here or at end of function?
         let _ = cx.local.debounce_timer.wait(); // consume the event
-        let result = [
-            read_debounced_button(&cx.local.buttons.button_a, &mut cx.local.debouncers[0]),
-            read_debounced_button(&cx.local.buttons.button_b, &mut cx.local.debouncers[1]),
+        let events = [
+            ev_for_btn_state(
+                BtnIds::BtnA,
+                read_debounced_button(&cx.local.buttons.button_a, &mut cx.local.debouncers[0])),
+            ev_for_btn_state(
+                BtnIds::BtnB,
+                read_debounced_button(&cx.local.buttons.button_b, &mut cx.local.debouncers[1])),
         ];
 
-        if result[0] == None && result[1] == None {
-            return;
+        for v in events.into_iter() {
+            if let Some(ev) = v {
+                rdbg!(ev);
+            }
         }
-        rdbg!(result);
     }
 
     fn read_debounced_button(btn: &dyn InputPin<Error = Void>, debouncer: &mut Debouncer) -> Option<BtnState> {
         let raw_state = if btn.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed };
         return debouncer.update(raw_state);
+    }
+
+    fn ev_for_btn_state(btn_id: BtnIds, btn_state: Option<BtnState>) -> Option<InputEvent> {
+        match (btn_id, btn_state) {
+            (BtnIds::BtnA, Some(BtnState::Pressed)) => Some(InputEvent::BtnAPressed),
+            (BtnIds::BtnB, Some(BtnState::Pressed)) => Some(InputEvent::BtnBPressed),
+            (BtnIds::BtnA, Some(BtnState::NotPressed)) => Some(InputEvent::BtnAReleased),
+            (BtnIds::BtnB, Some(BtnState::NotPressed)) => Some(InputEvent::BtnBReleased),
+            (_, None) => None
+        }
     }
 }
 
@@ -116,6 +132,20 @@ fn toggle(pin: &mut dyn StatefulOutputPin<Error = Void>) {
     } else {
         pin.set_high().void_unwrap();
     }
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+enum BtnIds {
+    BtnA,
+    BtnB,
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+enum InputEvent {
+    BtnAPressed,
+    BtnAReleased,
+    BtnBPressed,
+    BtnBReleased,
 }
 
 #[derive(PartialEq)]
