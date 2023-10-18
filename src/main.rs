@@ -90,18 +90,20 @@ mod app {
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers])]
     fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
         let _ = cx.local.debounce_timer.wait(); // consume the event
-        let raw_states = [
-            if cx.local.buttons.button_a.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed },
-            if cx.local.buttons.button_b.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed },
+        let result = [
+            read_debounced_button(&cx.local.buttons.button_a, &mut cx.local.debouncers[0]),
+            read_debounced_button(&cx.local.buttons.button_b, &mut cx.local.debouncers[1]),
         ];
-        for i in 0..2 {
-            let raw_state = raw_states[i];
-            let debouncer = &mut cx.local.debouncers[i];
-            let result = debouncer.update(raw_state);
-            if let Some(new_state) = result {
-                rdbg!(i, new_state);
-            }
+
+        if result[0] == None && result[1] == None {
+            return;
         }
+        rdbg!(result);
+    }
+
+    fn read_debounced_button(btn: &dyn InputPin<Error = Void>, debouncer: &mut Debouncer) -> Option<BtnState> {
+        let raw_state = if btn.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed };
+        return debouncer.update(raw_state);
     }
 }
 
