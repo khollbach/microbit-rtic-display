@@ -7,7 +7,7 @@ use panic_halt as _;
 
 use rtic::app;
 
-#[app(device = microbit::pac, peripherals = true)]
+#[app(device = microbit::pac, dispatchers=[SWI0_EGU0], peripherals = true)]
 mod app {
     use super::*;
 
@@ -38,7 +38,7 @@ mod app {
         debounce_timer: Timer<pac::TIMER1, Periodic>,
         pins: gpio::DisplayPins,
         buttons: Buttons,
-        debouncers: [Debouncer; 2]
+        debouncers: [Debouncer; 2],
     }
 
     #[init]
@@ -50,7 +50,7 @@ mod app {
         clocks.enable_ext_hfosc();
 
         toggle(&mut board.display_pins.row1);
-        toggle(&mut board.display_pins.col1);
+        toggle(&mut board.display_pins.col3);
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
@@ -58,12 +58,15 @@ mod app {
         timer0.enable_interrupt();
 
         // button debounce timer
+        // check buttons every 5 ms
+        // register a Pressed event after stable low state for 10 ms
+        // then register a Released event after stable high state for 100 ms
         let mut timer1 = Timer::periodic(board.TIMER1);
         timer1.start(5_000u32);
         timer1.enable_interrupt();
         let debouncers = [
-            Debouncer::new(2, 10),
-            Debouncer::new(2, 10)
+            Debouncer::new(2, 20),
+            Debouncer::new(2, 20)
         ];
 
         (
@@ -79,11 +82,11 @@ mod app {
         )
     }
 
-    #[task(binds = TIMER0, local = [display_timer, pins])]
+    #[task(binds = TIMER0, local = [display_timer/*, pins*/])]
     fn handle_display_timer(cx: handle_display_timer::Context) {
         let _ = cx.local.display_timer.wait(); // consume the event
-        let pins = cx.local.pins;
-        toggle(&mut pins.col1);
+        //let pins = cx.local.pins;
+        //toggle(&mut pins.col3);
         rprintln!("timer 0 ticked !");
     }
 
@@ -102,9 +105,21 @@ mod app {
 
         for v in events.into_iter() {
             if let Some(ev) = v {
-                rdbg!(ev);
+                handle_input_event::spawn(ev).unwrap();
             }
         }
+    }
+
+    // TODO: bug if both events fire simultaneously
+    #[task(priority = 1, local = [pins])]
+    fn handle_input_event(cx: handle_input_event::Context, ev: InputEvent) {
+        match ev {
+            InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
+            InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),
+            InputEvent::BtnBPressed => cx.local.pins.col5.set_low().void_unwrap(),
+            InputEvent::BtnBReleased => cx.local.pins.col5.set_high().void_unwrap(),
+        }
+        rdbg!(ev);
     }
 
     fn read_debounced_button(btn: &dyn InputPin<Error = Void>, debouncer: &mut Debouncer) -> Option<BtnState> {
@@ -141,7 +156,7 @@ enum BtnIds {
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
-enum InputEvent {
+pub enum InputEvent {
     BtnAPressed,
     BtnAReleased,
     BtnBPressed,
