@@ -3,7 +3,8 @@
 #![no_std]
 
 // use defmt_rtt as _;
-use panic_halt as _;
+//use panic_halt as _;
+use panic_rtt_target as _;
 
 use rtic::app;
 
