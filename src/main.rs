@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 #![no_main]
 #![no_std]
+#![feature(type_alias_impl_trait)]
 
 // use defmt_rtt as _;
 //use panic_halt as _;
@@ -43,7 +44,7 @@ mod app {
     }
 
     #[init]
-    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
+    fn init(cx: init::Context) -> (Shared, Local) {
         rtt_init_print!();
         let mut board = Board::new(cx.device, cx.core);
 
@@ -79,7 +80,6 @@ mod app {
                 buttons: board.buttons,
                 debouncers: debouncers,
             },
-            init::Monotonics(),
         )
     }
 
@@ -113,7 +113,7 @@ mod app {
 
     // TODO: bug if both events fire simultaneously
     #[task(priority = 1, local = [pins])]
-    fn handle_input_event(cx: handle_input_event::Context, ev: InputEvent) {
+    async fn handle_input_event(cx: handle_input_event::Context, ev: InputEvent) {
         match ev {
             InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
             InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),

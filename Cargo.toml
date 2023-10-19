@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"]}
 panic-halt = "0.2.0"
-cortex-m-rtic = { version = "1.1" }
 microbit-v2 = "0.13.0"
 rtt-target = "0.4.0"
 void = { version = "1.0.2", default-features = false }
 panic-rtt-target = { version = "0.1.2", features = ["cortex-m"] }
+rtic = { version = "2.0.1", features = ["thumbv7-backend", "cortex-m"]}
