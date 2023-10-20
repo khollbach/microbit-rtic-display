@@ -13,12 +13,14 @@ use rtic::app;
 mod app {
     use super::*;
 
+    use cortex_m::asm;
     use microbit::{
         board::{Board, Buttons},
         display::nonblocking::{Display, GreyscaleImage},
         gpio,
         hal::{
             clocks::Clocks,
+            gpio::{Pin, Output, PushPull},
             gpiote::{Gpiote, GpioteChannel},
             prelude::*,
             rtc::{Rtc, RtcInterrupt},
@@ -43,10 +45,11 @@ mod app {
     struct Local {
         display_timer: Timer<pac::TIMER0, Periodic>,
         debounce_timer: Timer<pac::TIMER1, Periodic>,
-        pins: gpio::DisplayPins,
         buttons: Buttons,
         debouncers: [Debouncer; 2],
         inputq: InputQueueSender,
+        display_rows: [Pin<Output<PushPull>>; 5],
+        display_cols: [Pin<Output<PushPull>>; 5],
     }
 
     #[init]
@@ -62,7 +65,7 @@ mod app {
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(1_000_000u32);
+        timer0.start(100_000u32); // 0.1 s
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -80,25 +83,37 @@ mod app {
         let (s, r) = make_channel!(InputEvent, INPUTQ_CAPACITY);
         handle_input_event::spawn(r).unwrap(); 
 
+        // note the order!
+        let (display_cols, display_rows) = board.display_pins.degrade();
+
         (
             Shared {},
             Local {
                 display_timer: timer0,
                 debounce_timer: timer1,
-                pins: board.display_pins,
                 buttons: board.buttons,
                 debouncers: debouncers,
-                inputq: s
+                inputq: s,
+                display_rows,
+                display_cols,
             },
         )
     }
 
-    #[task(binds = TIMER0, local = [display_timer/*, pins*/])]
+    #[task(binds = TIMER0, local = [display_timer, display_rows, display_cols, active_row: u8 = 0])]
     fn handle_display_timer(cx: handle_display_timer::Context) {
         let _ = cx.local.display_timer.wait(); // consume the event
-        //let pins = cx.local.pins;
-        //toggle(&mut pins.col3);
-        rprintln!("timer 0 ticked !");
+
+        // clear the previous row
+        cx.local.display_rows[*cx.local.active_row as usize].set_low().void_unwrap();
+
+        *cx.local.active_row += 1;
+        if *cx.local.active_row >= 5 {
+            *cx.local.active_row = 0;
+        }
+
+        // activate the new row
+        cx.local.display_rows[*cx.local.active_row as usize].set_high().void_unwrap();
     }
 
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, inputq])]
@@ -122,17 +137,15 @@ mod app {
         }
     }
 
-    // TODO: bug if both events fire simultaneously
-    // TODO: Receiver type alias
-    #[task(priority = 1, local = [pins])]
-    async fn handle_input_event(cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
+    #[task(priority = 1)]
+    async fn handle_input_event(_cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
         while let Ok(ev) = inputqr.recv().await {
-            match ev {
-                InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
-                InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),
-                InputEvent::BtnBPressed => cx.local.pins.col5.set_low().void_unwrap(),
-                InputEvent::BtnBReleased => cx.local.pins.col5.set_high().void_unwrap(),
-            }
+            // match ev {
+                // InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
+                // InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),
+                // InputEvent::BtnBPressed => cx.local.pins.col5.set_low().void_unwrap(),
+                // InputEvent::BtnBReleased => cx.local.pins.col5.set_high().void_unwrap(),
+            // }
             rdbg!(ev);
         }
     }
