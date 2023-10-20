@@ -32,7 +32,9 @@ mod app {
     use void::{ResultVoidExt, Void};
     use rtic_sync::{channel::*, make_channel};
 
-    const CAPACITY: usize = 16;
+    const INPUTQ_CAPACITY: usize = 16;
+    type InputQueueSender = Sender<'static, InputEvent, INPUTQ_CAPACITY>;
+    type InputQueueReceiver = Receiver<'static, InputEvent, INPUTQ_CAPACITY>;
 
     #[shared]
     struct Shared {}
@@ -44,7 +46,7 @@ mod app {
         pins: gpio::DisplayPins,
         buttons: Buttons,
         debouncers: [Debouncer; 2],
-        sender: Sender<'static, InputEvent, CAPACITY>,
+        inputq: InputQueueSender,
     }
 
     #[init]
@@ -75,7 +77,7 @@ mod app {
             Debouncer::new(2, 20)
         ];
 
-        let (s, r) = make_channel!(InputEvent, CAPACITY);
+        let (s, r) = make_channel!(InputEvent, INPUTQ_CAPACITY);
         handle_input_event::spawn(r).unwrap(); 
 
         (
@@ -86,7 +88,7 @@ mod app {
                 pins: board.display_pins,
                 buttons: board.buttons,
                 debouncers: debouncers,
-                sender: s
+                inputq: s
             },
         )
     }
@@ -99,7 +101,7 @@ mod app {
         rprintln!("timer 0 ticked !");
     }
 
-    #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, sender])]
+    #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, inputq])]
     fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
         // TODO: better to clear the event here or at end of function?
         let _ = cx.local.debounce_timer.wait(); // consume the event
@@ -115,15 +117,16 @@ mod app {
         for v in events.into_iter() {
             if let Some(ev) = v {
                 //handle_input_event::spawn(ev).unwrap();
-                cx.local.sender.try_send(ev).ok();
+                cx.local.inputq.try_send(ev).ok();
             }
         }
     }
 
     // TODO: bug if both events fire simultaneously
+    // TODO: Receiver type alias
     #[task(priority = 1, local = [pins])]
-    async fn handle_input_event(cx: handle_input_event::Context, mut receiver: Receiver<'static, InputEvent, CAPACITY>) {
-        while let Ok(ev) = receiver.recv().await {
+    async fn handle_input_event(cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
+        while let Ok(ev) = inputqr.recv().await {
             match ev {
                 InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
                 InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),
