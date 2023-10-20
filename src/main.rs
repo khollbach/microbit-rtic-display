@@ -32,6 +32,7 @@ mod app {
     };
     use rtt_target::{rdbg, rprintln, rtt_init_print};
     use void::{ResultVoidExt, Void};
+    use core::iter::zip;
     use rtic_sync::{channel::*, make_channel};
 
     const INPUTQ_CAPACITY: usize = 16;
@@ -65,7 +66,7 @@ mod app {
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(100_000u32); // 0.1 s
+        timer0.start(1000u32);  // in microseconds
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -104,12 +105,30 @@ mod app {
     fn handle_display_timer(cx: handle_display_timer::Context) {
         let _ = cx.local.display_timer.wait(); // consume the event
 
+        let display_buf = [
+            [false, true , false, true , false],
+            [true , false, true , false, true ],
+            [true , false, false, false, true ],
+            [false, true , false, true , false],
+            [false, false, true , false, false],
+        ];
+
         // clear the previous row
         cx.local.display_rows[*cx.local.active_row as usize].set_low().void_unwrap();
 
         *cx.local.active_row += 1;
         if *cx.local.active_row >= 5 {
             *cx.local.active_row = 0;
+        }
+
+        // set column values for new row
+
+        for (col, val) in zip(cx.local.display_cols, display_buf[*cx.local.active_row as usize]) {
+            if val {
+                col.set_low().void_unwrap();
+            } else {
+                col.set_high().void_unwrap();
+            }
         }
 
         // activate the new row
