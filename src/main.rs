@@ -39,6 +39,22 @@ mod app {
     type InputQueueSender = Sender<'static, InputEvent, INPUTQ_CAPACITY>;
     type InputQueueReceiver = Receiver<'static, InputEvent, INPUTQ_CAPACITY>;
 
+    //const HEART_IMAGE: [[bool; 5]; 5] = [
+        //[false, true , false, true , false],
+        //[true , false, true , false, true ],
+        //[true , false, false, false, true ],
+        //[false, true , false, true , false],
+        //[false, false, true , false, false],
+    //];
+
+    const HEART_IMAGE: [[u8; 5]; 5] = [
+        [ 0, 15,  0, 15,  0],
+        [15,  1, 15,  1, 15],
+        [15,  3,  3,  3, 15],
+        [ 0, 15,  1, 15,  0],
+        [ 0,  0, 15,  0,  0],
+    ];
+
     #[shared]
     struct Shared {}
 
@@ -66,7 +82,7 @@ mod app {
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(1000u32);  // in microseconds
+        timer0.start(4u32);  // in microseconds
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -101,38 +117,79 @@ mod app {
         )
     }
 
-    #[task(binds = TIMER0, local = [display_timer, display_rows, display_cols, active_row: u8 = 0])]
+    /*
+    // bit-bash 4-bit pwm
+    #[task(binds = TIMER0, local = [
+        display_timer, display_rows, display_cols, active_row: u8 = 0, display_ticks: u8 = 0])]
     fn handle_display_timer(cx: handle_display_timer::Context) {
         let _ = cx.local.display_timer.wait(); // consume the event
 
-        let display_buf = [
-            [false, true , false, true , false],
-            [true , false, true , false, true ],
-            [true , false, false, false, true ],
-            [false, true , false, true , false],
-            [false, false, true , false, false],
-        ];
+        let display_buf = &HEART_IMAGE;
+
+        let active_row = cx.local.active_row;
+        let ticks = cx.local.display_ticks;
+
+        *ticks += 1;
+        if *ticks > 15 {
+            *ticks = 0;
+        }
 
         // clear the previous row
-        cx.local.display_rows[*cx.local.active_row as usize].set_low().void_unwrap();
+        if *ticks == 0 {
+            cx.local.display_rows[*active_row as usize].set_low().void_unwrap();
 
-        *cx.local.active_row += 1;
-        if *cx.local.active_row >= 5 {
-            *cx.local.active_row = 0;
+            *active_row += 1;
+            if *active_row >= 5 {
+                *active_row = 0;
+            }
         }
 
         // set column values for new row
-
-        for (col, val) in zip(cx.local.display_cols, display_buf[*cx.local.active_row as usize]) {
-            if val {
-                col.set_low().void_unwrap();
+        for (col, brightness) in zip(cx.local.display_cols, display_buf[*active_row as usize]) {
+            if brightness > 0 && brightness >= *ticks {
+                col.set_low().void_unwrap();    // led on
             } else {
-                col.set_high().void_unwrap();
+                col.set_high().void_unwrap();   // led off
             }
         }
 
         // activate the new row
-        cx.local.display_rows[*cx.local.active_row as usize].set_high().void_unwrap();
+        if *ticks == 0 {
+            cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
+        }
+    }
+    */
+
+    #[task(binds = TIMER0, local = [
+        display_timer, display_rows, display_cols, active_row: u8 = 0])]
+    fn handle_display_timer(cx: handle_display_timer::Context) {
+        let _ = cx.local.display_timer.wait(); // consume the event
+
+        let display_buf = &HEART_IMAGE;
+
+        let active_row = cx.local.active_row;
+
+        // clear the previous row
+        cx.local.display_rows[*active_row as usize].set_low().void_unwrap();
+
+        *active_row += 1;
+        if *active_row >= 5 {
+            *active_row = 0;
+        }
+
+        // set column values for new row
+        for (col, brightness) in zip(cx.local.display_cols, display_buf[*active_row as usize]) {
+            if brightness > 0 {
+                col.set_low().void_unwrap();    // led on
+            } else {
+                col.set_high().void_unwrap();   // led off
+            }
+        }
+
+        //toggle(&mut cx.local.display_cols[0]);
+
+        // activate the new row
+        cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
     }
 
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, inputq])]
