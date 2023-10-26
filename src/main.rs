@@ -56,7 +56,45 @@ mod app {
     ];
 
     #[shared]
-    struct Shared {}
+    struct Shared {
+        game_state: GameState,
+    }
+
+    pub struct GameState {
+        spaceship_x: usize,
+    }
+
+
+    /*
+    type DisplayBuffer = [[bool; 5]; 5];
+
+    struct ScreenState {
+        buffers: [DisplayBuffer; 2],
+        active_buffer: usize,
+    }
+
+    struct ScreenReader
+    struct ScreenWriter
+
+    impl ScreenState {
+        fn new() -> (ScreenReader, ScreenWriter)
+    }
+
+    impl ScreenWriter {
+        fn swap(&mut self) {
+            unsafe {
+                active_buffer += 1;
+                active_buffer %= 2;
+            }
+        }
+
+        fn buffer(&mut self) -> &mut DisplayBuffer
+    }
+
+    impl ScreenReader {
+        fn buffer(&self) -> &DisplayBuffer
+    }
+    */
 
     type ScopePin = p0::P0_02<Output<PushPull>>;
 
@@ -109,7 +147,9 @@ mod app {
         let (display_cols, display_rows) = board.display_pins.degrade();
 
         (
-            Shared {},
+            Shared {
+                game_state: GameState { spaceship_x: 2 },
+            },
             Local {
                 display_timer: timer0,
                 debounce_timer: timer1,
@@ -123,14 +163,20 @@ mod app {
         )
     }
 
-    /*
     // bit-bash 4-bit pwm
-    #[task(binds = TIMER0, local = [
-        display_timer, display_rows, display_cols, active_row: u8 = 0, display_ticks: u8 = 0])]
-    fn handle_display_timer(cx: handle_display_timer::Context) {
+    #[task(binds = TIMER0, shared = [game_state], local = [
+        display_timer, display_rows, display_cols, active_row: u8 = 0, display_ticks: u8 = 0, scope_pin])]
+    fn handle_display_timer(mut cx: handle_display_timer::Context) {
+        cx.local.scope_pin.set_low().void_unwrap();
+
         let _ = cx.local.display_timer.wait(); // consume the event
 
-        let display_buf = &HEART_IMAGE;
+        // let display_buf = &HEART_IMAGE;
+        let display_buf = cx.shared.game_state.lock(|game_state| {
+            let mut buf = [[0; 5]; 5];
+            buf[4][game_state.spaceship_x] = 15;
+            buf
+        });
 
         let active_row = cx.local.active_row;
         let ticks = cx.local.display_ticks;
@@ -163,42 +209,43 @@ mod app {
         if *ticks == 0 {
             cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
         }
-    }
-    */
 
-    #[task(binds = TIMER0, local = [
-        display_timer, display_rows, display_cols, active_row: u8 = 0, scope_pin])]
-    fn handle_display_timer(cx: handle_display_timer::Context) {
-        cx.local.scope_pin.set_low().void_unwrap();
-        let _ = cx.local.display_timer.wait(); // consume the event
-
-        let display_buf = &HEART_IMAGE;
-
-        let active_row = cx.local.active_row;
-
-        // clear the previous row
-        cx.local.display_rows[*active_row as usize].set_low().void_unwrap();
-
-        *active_row += 1;
-        if *active_row >= 5 {
-            *active_row = 0;
-        }
-
-        // set column values for new row
-        for (col, brightness) in zip(cx.local.display_cols, display_buf[*active_row as usize]) {
-            if brightness > 0 {
-                col.set_low().void_unwrap();    // led on
-            } else {
-                col.set_high().void_unwrap();   // led off
-            }
-        }
-
-        //toggle(&mut cx.local.display_cols[0]);
-
-        // activate the new row
-        cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
         cx.local.scope_pin.set_high().void_unwrap();
     }
+
+    // #[task(binds = TIMER0, local = [
+    //     display_timer, display_rows, display_cols, active_row: u8 = 0, scope_pin])]
+    // fn handle_display_timer(cx: handle_display_timer::Context) {
+    //     cx.local.scope_pin.set_low().void_unwrap();
+    //     let _ = cx.local.display_timer.wait(); // consume the event
+
+    //     let display_buf = &HEART_IMAGE;
+
+    //     let active_row = cx.local.active_row;
+
+    //     // clear the previous row
+    //     cx.local.display_rows[*active_row as usize].set_low().void_unwrap();
+
+    //     *active_row += 1;
+    //     if *active_row >= 5 {
+    //         *active_row = 0;
+    //     }
+
+    //     // set column values for new row
+    //     for (col, brightness) in zip(cx.local.display_cols, display_buf[*active_row as usize]) {
+    //         if brightness > 0 {
+    //             col.set_low().void_unwrap();    // led on
+    //         } else {
+    //             col.set_high().void_unwrap();   // led off
+    //         }
+    //     }
+
+    //     //toggle(&mut cx.local.display_cols[0]);
+
+    //     // activate the new row
+    //     cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
+    //     cx.local.scope_pin.set_high().void_unwrap();
+    // }
 
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, inputq])]
     fn handle_debounce_timer(cx: handle_debounce_timer::Context) {
@@ -221,15 +268,26 @@ mod app {
         }
     }
 
-    #[task(priority = 1)]
-    async fn handle_input_event(_cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
+    #[task(priority = 1, shared = [game_state])]
+    async fn handle_input_event(mut cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
         while let Ok(ev) = inputqr.recv().await {
-            // match ev {
-                // InputEvent::BtnAPressed => cx.local.pins.col1.set_low().void_unwrap(),
-                // InputEvent::BtnAReleased => cx.local.pins.col1.set_high().void_unwrap(),
-                // InputEvent::BtnBPressed => cx.local.pins.col5.set_low().void_unwrap(),
-                // InputEvent::BtnBReleased => cx.local.pins.col5.set_high().void_unwrap(),
-            // }
+            cx.shared.game_state.lock(|state| {
+                match ev {
+                    InputEvent::BtnAPressed => {
+                        if state.spaceship_x > 0 {
+                            state.spaceship_x -= 1;
+                        }
+                    }
+                    InputEvent::BtnAReleased => (),
+                    InputEvent::BtnBPressed => {
+                        if state.spaceship_x + 1 < 5 {
+                            state.spaceship_x += 1;
+                        }
+                    }
+                    InputEvent::BtnBReleased => (),
+                }
+                rdbg!(state.spaceship_x);
+            });
             rdbg!(ev);
         }
     }
