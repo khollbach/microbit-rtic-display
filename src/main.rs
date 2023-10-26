@@ -15,12 +15,12 @@ mod app {
 
     use cortex_m::asm;
     use microbit::{
-        board::{Board, Buttons},
+        board::{Board, Buttons, Pins},
         display::nonblocking::{Display, GreyscaleImage},
         gpio,
         hal::{
             clocks::Clocks,
-            gpio::{Pin, Output, PushPull},
+            gpio::{Pin, Output, PushPull, Level, p0},
             gpiote::{Gpiote, GpioteChannel},
             prelude::*,
             rtc::{Rtc, RtcInterrupt},
@@ -58,11 +58,14 @@ mod app {
     #[shared]
     struct Shared {}
 
+    type ScopePin = p0::P0_02<Output<PushPull>>;
+
     #[local]
     struct Local {
         display_timer: Timer<pac::TIMER0, Periodic>,
         debounce_timer: Timer<pac::TIMER1, Periodic>,
         buttons: Buttons,
+        scope_pin: ScopePin,
         debouncers: [Debouncer; 2],
         inputq: InputQueueSender,
         display_rows: [Pin<Output<PushPull>>; 5],
@@ -80,9 +83,11 @@ mod app {
         toggle(&mut board.display_pins.row1);
         toggle(&mut board.display_pins.col3);
 
+        let scope_pin = board.pins.p0_02.into_push_pull_output(Level::Low);
+
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(4u32);  // in microseconds
+        timer0.start(1u32);  // in microseconds
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -109,6 +114,7 @@ mod app {
                 display_timer: timer0,
                 debounce_timer: timer1,
                 buttons: board.buttons,
+                scope_pin: scope_pin,
                 debouncers: debouncers,
                 inputq: s,
                 display_rows,
@@ -161,8 +167,9 @@ mod app {
     */
 
     #[task(binds = TIMER0, local = [
-        display_timer, display_rows, display_cols, active_row: u8 = 0])]
+        display_timer, display_rows, display_cols, active_row: u8 = 0, scope_pin])]
     fn handle_display_timer(cx: handle_display_timer::Context) {
+        cx.local.scope_pin.set_low().void_unwrap();
         let _ = cx.local.display_timer.wait(); // consume the event
 
         let display_buf = &HEART_IMAGE;
@@ -190,6 +197,7 @@ mod app {
 
         // activate the new row
         cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
+        cx.local.scope_pin.set_high().void_unwrap();
     }
 
     #[task(binds = TIMER1, local = [debounce_timer, buttons, debouncers, inputq])]
