@@ -4,8 +4,8 @@
 #![feature(type_alias_impl_trait)]
 
 // use defmt_rtt as _;
-//use panic_halt as _;
-use panic_rtt_target as _;
+use panic_halt as _;
+//use panic_rtt_target as _;
 
 use rtic::app;
 
@@ -343,7 +343,6 @@ mod app {
         mut cx: handle_input_event::Context,
         mut inputqr: InputQueueReceiver,
     ) {
-        // rprintln!("test handle_input_event");
         while let Ok(ev) = inputqr.recv().await {
             rdbg!(ev);
             cx.shared.game_state.lock(|state| {
