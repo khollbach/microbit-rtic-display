@@ -13,47 +13,47 @@ use rtic::app;
 mod app {
     use super::*;
 
+    use core::iter::zip;
     use cortex_m::asm;
+    use heapless::Vec;
     use microbit::{
         board::{Board, Buttons, Pins},
         display::nonblocking::{Display, GreyscaleImage},
         gpio,
         hal::{
             clocks::Clocks,
-            gpio::{Pin, Output, PushPull, Level, p0},
+            gpio::{p0, Level, Output, Pin, PushPull},
             gpiote::{Gpiote, GpioteChannel},
             prelude::*,
-            rtc::{Rtc, RtcInterrupt},
+            rtc::{Rtc, RtcInterrupt, RtcCompareReg},
             timer::Instance,
             timer::Periodic,
             Timer,
         },
         pac, Peripherals,
     };
+    use rtic_sync::{channel::*, make_channel};
     use rtt_target::{rdbg, rprintln, rtt_init_print};
     use void::{ResultVoidExt, Void};
-    use core::iter::zip;
-    use heapless::Vec;
-    use rtic_sync::{channel::*, make_channel};
 
     const INPUTQ_CAPACITY: usize = 16;
     type InputQueueSender = Sender<'static, InputEvent, INPUTQ_CAPACITY>;
     type InputQueueReceiver = Receiver<'static, InputEvent, INPUTQ_CAPACITY>;
 
     //const HEART_IMAGE: [[bool; 5]; 5] = [
-        //[false, true , false, true , false],
-        //[true , false, true , false, true ],
-        //[true , false, false, false, true ],
-        //[false, true , false, true , false],
-        //[false, false, true , false, false],
+    //[false, true , false, true , false],
+    //[true , false, true , false, true ],
+    //[true , false, false, false, true ],
+    //[false, true , false, true , false],
+    //[false, false, true , false, false],
     //];
 
     const HEART_IMAGE: [[u8; 5]; 5] = [
-        [ 0, 15,  0, 15,  0],
-        [15,  1, 15,  1, 15],
-        [15,  3,  3,  3, 15],
-        [ 0, 15,  1, 15,  0],
-        [ 0,  0, 15,  0,  0],
+        [0, 15, 0, 15, 0],
+        [15, 1, 15, 1, 15],
+        [15, 3, 3, 3, 15],
+        [0, 15, 1, 15, 0],
+        [0, 0, 15, 0, 0],
     ];
 
     #[shared]
@@ -66,7 +66,6 @@ mod app {
         enemies: [bool; 5],
         shots: Vec<(usize, usize), 25>,
     }
-
 
     /*
     type DisplayBuffer = [[bool; 5]; 5];
@@ -111,6 +110,7 @@ mod app {
         inputq: InputQueueSender,
         display_rows: [Pin<Output<PushPull>>; 5],
         display_cols: [Pin<Output<PushPull>>; 5],
+        rtc: Rtc<pac::RTC0>,
     }
 
     #[init]
@@ -128,7 +128,7 @@ mod app {
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(4u32);  // in microseconds
+        timer0.start(4u32); // in microseconds
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -138,20 +138,23 @@ mod app {
         let mut timer1 = Timer::periodic(board.TIMER1);
         timer1.start(5_000u32);
         timer1.enable_interrupt();
-        let debouncers = [
-            Debouncer::new(2, 20),
-            Debouncer::new(2, 20)
-        ];
+        let debouncers = [Debouncer::new(2, 20), Debouncer::new(2, 20)];
 
         let (s, r) = make_channel!(InputEvent, INPUTQ_CAPACITY);
-        handle_input_event::spawn(r).unwrap(); 
+        handle_input_event::spawn(r).unwrap();
 
         // note the order!
         let (display_cols, display_rows) = board.display_pins.degrade();
 
+        let mut rtc = Rtc::new(board.RTC0, 4096 - 1).unwrap();
+        rtc.enable_counter();
+        rtc.set_compare(RtcCompareReg::Compare0, 4).unwrap();
+        rtc.enable_event(RtcInterrupt::Compare0);
+        rtc.enable_interrupt(RtcInterrupt::Compare0, None);
+
         (
             Shared {
-                game_state: GameState { 
+                game_state: GameState {
                     spaceship_x: 2,
                     enemies: [true; 5],
                     shots: Vec::new(),
@@ -166,8 +169,17 @@ mod app {
                 inputq: s,
                 display_rows,
                 display_cols,
+                rtc,
             },
         )
+    }
+
+    #[task(binds = RTC0, local = [rtc])]
+    fn game_tick(cx: game_tick::Context) {
+        cx.local.rtc.reset_event(RtcInterrupt::Compare0);
+        cx.local.rtc.clear_counter();
+
+        rdbg!("game tick");
     }
 
     // bit-bash 4-bit pwm
@@ -182,7 +194,7 @@ mod app {
         let display_buf = cx.shared.game_state.lock(|game_state| {
             let mut buf = [[0; 5]; 5];
             buf[4][game_state.spaceship_x] = 15;
-            buf[0] = game_state.enemies.map(|v| if v {7} else {0});
+            buf[0] = game_state.enemies.map(|v| if v { 7 } else { 0 });
 
             for &(x, y) in &game_state.shots {
                 buf[y][x] = 3;
@@ -201,7 +213,9 @@ mod app {
 
         // clear the previous row
         if *ticks == 0 {
-            cx.local.display_rows[*active_row as usize].set_low().void_unwrap();
+            cx.local.display_rows[*active_row as usize]
+                .set_low()
+                .void_unwrap();
 
             *active_row += 1;
             if *active_row >= 5 {
@@ -212,15 +226,17 @@ mod app {
         // set column values for new row
         for (col, brightness) in zip(cx.local.display_cols, display_buf[*active_row as usize]) {
             if brightness > 0 && brightness >= *ticks {
-                col.set_low().void_unwrap();    // led on
+                col.set_low().void_unwrap(); // led on
             } else {
-                col.set_high().void_unwrap();   // led off
+                col.set_high().void_unwrap(); // led off
             }
         }
 
         // activate the new row
         if *ticks == 0 {
-            cx.local.display_rows[*active_row as usize].set_high().void_unwrap();
+            cx.local.display_rows[*active_row as usize]
+                .set_high()
+                .void_unwrap();
         }
 
         cx.local.scope_pin.set_high().void_unwrap();
@@ -267,10 +283,12 @@ mod app {
         let events = [
             ev_for_btn_state(
                 BtnIds::BtnA,
-                read_debounced_button(&cx.local.buttons.button_a, &mut cx.local.debouncers[0])),
+                read_debounced_button(&cx.local.buttons.button_a, &mut cx.local.debouncers[0]),
+            ),
             ev_for_btn_state(
                 BtnIds::BtnB,
-                read_debounced_button(&cx.local.buttons.button_b, &mut cx.local.debouncers[1])),
+                read_debounced_button(&cx.local.buttons.button_b, &mut cx.local.debouncers[1]),
+            ),
         ];
 
         for v in events.into_iter() {
@@ -282,9 +300,13 @@ mod app {
     }
 
     #[task(priority = 1, shared = [game_state])]
-    async fn handle_input_event(mut cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
-        rprintln!("test handle_input_event");
+    async fn handle_input_event(
+        mut cx: handle_input_event::Context,
+        mut inputqr: InputQueueReceiver,
+    ) {
+        // rprintln!("test handle_input_event");
         while let Ok(ev) = inputqr.recv().await {
+            rdbg!(ev);
             cx.shared.game_state.lock(|state| {
                 match ev {
                     InputEvent::BtnAPressed => {
@@ -302,14 +324,20 @@ mod app {
                         state.shots.push((state.spaceship_x, 3)).unwrap();
                     }
                 }
-                rdbg!(state.spaceship_x);
+                // rdbg!(state.spaceship_x);
             });
-            rdbg!(ev);
         }
     }
 
-    fn read_debounced_button(btn: &dyn InputPin<Error = Void>, debouncer: &mut Debouncer) -> Option<BtnState> {
-        let raw_state = if btn.is_high().void_unwrap() { BtnState::NotPressed } else { BtnState::Pressed };
+    fn read_debounced_button(
+        btn: &dyn InputPin<Error = Void>,
+        debouncer: &mut Debouncer,
+    ) -> Option<BtnState> {
+        let raw_state = if btn.is_high().void_unwrap() {
+            BtnState::NotPressed
+        } else {
+            BtnState::Pressed
+        };
         return debouncer.update(raw_state);
     }
 
@@ -319,7 +347,7 @@ mod app {
             (BtnIds::BtnB, Some(BtnState::Pressed)) => Some(InputEvent::BtnBPressed),
             (BtnIds::BtnA, Some(BtnState::NotPressed)) => Some(InputEvent::BtnAReleased),
             (BtnIds::BtnB, Some(BtnState::NotPressed)) => Some(InputEvent::BtnBReleased),
-            (_, None) => None
+            (_, None) => None,
         }
     }
 }
