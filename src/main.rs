@@ -33,6 +33,7 @@ mod app {
     use rtt_target::{rdbg, rprintln, rtt_init_print};
     use void::{ResultVoidExt, Void};
     use core::iter::zip;
+    use heapless::Vec;
     use rtic_sync::{channel::*, make_channel};
 
     const INPUTQ_CAPACITY: usize = 16;
@@ -62,6 +63,8 @@ mod app {
 
     pub struct GameState {
         spaceship_x: usize,
+        enemies: [bool; 5],
+        shots: Vec<(usize, usize), 25>,
     }
 
 
@@ -125,7 +128,7 @@ mod app {
 
         // LED display timer
         let mut timer0 = Timer::periodic(board.TIMER0);
-        timer0.start(1u32);  // in microseconds
+        timer0.start(4u32);  // in microseconds
         timer0.enable_interrupt();
 
         // button debounce timer
@@ -148,7 +151,11 @@ mod app {
 
         (
             Shared {
-                game_state: GameState { spaceship_x: 2 },
+                game_state: GameState { 
+                    spaceship_x: 2,
+                    enemies: [true; 5],
+                    shots: Vec::new(),
+                },
             },
             Local {
                 display_timer: timer0,
@@ -175,6 +182,12 @@ mod app {
         let display_buf = cx.shared.game_state.lock(|game_state| {
             let mut buf = [[0; 5]; 5];
             buf[4][game_state.spaceship_x] = 15;
+            buf[0] = game_state.enemies.map(|v| if v {7} else {0});
+
+            for &(x, y) in &game_state.shots {
+                buf[y][x] = 3;
+            }
+
             buf
         });
 
@@ -270,6 +283,7 @@ mod app {
 
     #[task(priority = 1, shared = [game_state])]
     async fn handle_input_event(mut cx: handle_input_event::Context, mut inputqr: InputQueueReceiver) {
+        rprintln!("test handle_input_event");
         while let Ok(ev) = inputqr.recv().await {
             cx.shared.game_state.lock(|state| {
                 match ev {
@@ -284,7 +298,9 @@ mod app {
                             state.spaceship_x += 1;
                         }
                     }
-                    InputEvent::BtnBReleased => (),
+                    InputEvent::BtnBReleased => {
+                        state.shots.push((state.spaceship_x, 3)).unwrap();
+                    }
                 }
                 rdbg!(state.spaceship_x);
             });

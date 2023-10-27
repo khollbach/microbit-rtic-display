@@ -249,6 +249,7 @@ name = "microbit-rtic-display"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
+ "heapless",
  "microbit-v2",
  "panic-halt",
  "panic-rtt-target",
