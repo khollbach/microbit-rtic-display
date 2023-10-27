@@ -62,9 +62,27 @@ mod app {
     }
 
     pub struct GameState {
+        run_state: RunState,
         spaceship_x: usize,
         enemies: [bool; 5],
         shots: Vec<(usize, usize), 25>,
+    }
+
+    #[derive(PartialEq, Copy, Clone, Debug)]
+    enum RunState {
+        Running,
+        Victory
+    }
+
+    impl GameState {
+        fn new() -> Self {
+            Self {
+                run_state: RunState::Running,
+                spaceship_x: 2,
+                enemies: [true; 5],
+                shots: Vec::new(),
+            }
+        }
     }
 
     /*
@@ -154,11 +172,7 @@ mod app {
 
         (
             Shared {
-                game_state: GameState {
-                    spaceship_x: 2,
-                    enemies: [true; 5],
-                    shots: Vec::new(),
-                },
+                game_state: GameState::new(),
             },
             Local {
                 display_timer: timer0,
@@ -193,6 +207,10 @@ mod app {
                     true
                 }
             });
+
+            if game_state.enemies.iter().all(|&x| !x) {
+                game_state.run_state = RunState::Victory;
+            }
         });
 
         rdbg!("game tick");
@@ -209,6 +227,11 @@ mod app {
         // let display_buf = &HEART_IMAGE;
         let display_buf = cx.shared.game_state.lock(|game_state| {
             let mut buf = [[0; 5]; 5];
+
+            if game_state.run_state == RunState::Victory {
+                return [[15; 5]; 5];
+            }
+
             buf[4][game_state.spaceship_x] = 15;
             buf[0] = game_state.enemies.map(|v| if v { 7 } else { 0 });
 
@@ -324,6 +347,13 @@ mod app {
         while let Ok(ev) = inputqr.recv().await {
             rdbg!(ev);
             cx.shared.game_state.lock(|state| {
+                if state.run_state == RunState::Victory {
+                    if ev == InputEvent::BtnAPressed || ev == InputEvent::BtnBPressed {
+                        *state = GameState::new();
+                    }
+                    return;
+                }
+
                 match ev {
                     InputEvent::BtnAPressed => {
                         if state.spaceship_x > 0 {
