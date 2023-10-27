@@ -174,10 +174,26 @@ mod app {
         )
     }
 
-    #[task(binds = RTC0, local = [rtc])]
-    fn game_tick(cx: game_tick::Context) {
+    #[task(binds = RTC0, shared = [game_state], local = [rtc])]
+    fn game_tick(mut cx: game_tick::Context) {
         cx.local.rtc.reset_event(RtcInterrupt::Compare0);
         cx.local.rtc.clear_counter();
+
+        cx.shared.game_state.lock(|game_state| {
+            game_state.shots.retain_mut(|(x, y)| if *y <= 0 {
+                // off the screen
+                false
+            } else {
+                *y -= 1;
+                if *y == 0 && game_state.enemies[*x] {
+                    // hit an alien
+                    game_state.enemies[*x] = false;
+                    false
+                } else {
+                    true
+                }
+            });
+        });
 
         rdbg!("game tick");
     }
@@ -321,7 +337,11 @@ mod app {
                         }
                     }
                     InputEvent::BtnBReleased => {
-                        state.shots.push((state.spaceship_x, 3)).unwrap();
+                        let new_shot = (state.spaceship_x, 3);
+
+                        if !state.shots.contains(&new_shot) {
+                            state.shots.push(new_shot).unwrap();
+                        }
                     }
                 }
                 // rdbg!(state.spaceship_x);
